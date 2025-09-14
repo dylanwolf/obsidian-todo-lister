@@ -1,0 +1,17 @@
+/*
+
+This CSS file will be included with your plugin, and
+available in the app when your plugin is enabled.
+
+If your plugin does not need CSS, delete this file.
+
+*/
+
+.workspace-leaf-content[data-type='todo-lister-listview'] {
+    overflow-y: auto;
+    margin: 0.5em;
+}
+
+.workspace-leaf-content[data-type='todo-lister-listview'] ul {
+    margin: 0 0.25em;
+}

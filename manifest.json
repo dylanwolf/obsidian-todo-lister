@@ -1,0 +1,11 @@
+{
+	"id": "todo-lister",
+	"name": "TODO Lister",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Displays a list of all TODO notes found in a vault's markdown files.",
+	"author": "Dylan Wolf",
+	"authorUrl": "https://www.dylanwolf.com/",
+	"fundingUrl": "https://ko-fi.com/dylanwolf",
+	"isDesktopOnly": true
+}
