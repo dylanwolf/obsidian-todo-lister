@@ -15,3 +15,8 @@ If your plugin does not need CSS, delete this file.
 .workspace-leaf-content[data-type='todo-lister-listview'] ul {
     margin: 0 0.25em;
 }
+
+.workspace-leaf-content[data-type='todo-lister-listview'] div.error-message {
+    text-align: center;
+    font-style: italic;
+}

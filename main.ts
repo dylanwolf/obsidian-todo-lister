@@ -4,9 +4,11 @@ import {
 	ItemView,
 	MarkdownView,
 	Plugin,
+	TAbstractFile,
 	TFile,
 	WorkspaceLeaf,
 } from "obsidian";
+import * as path from "path";
 var removeMd = require("remove-markdown");
 
 interface ToDoListerPluginSettings {}
@@ -85,6 +87,19 @@ const VIEW_TYPE_ID = "todo-lister-listview";
 class ToDoListTab extends ItemView {
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
+		this.setEvents();
+	}
+
+	private eventsSet: boolean = false;
+	setEvents() {
+		if (!this.eventsSet) {
+			this.app.vault.on("create", () => this.reloadContents());
+			this.app.vault.on("modify", () => this.reloadContents());
+			this.app.vault.on("delete", () => this.reloadContents());
+			this.app.vault.on("rename", () => this.reloadContents());
+
+			this.eventsSet = true;
+		}
 	}
 
 	getIcon(): IconName {
@@ -99,7 +114,11 @@ class ToDoListTab extends ItemView {
 		return "TODO Lister";
 	}
 
-	protected async onOpen(): Promise<void> {
+	protected async onOpen() {
+		this.reloadContents();
+	}
+
+	protected async reloadContents() {
 		// Clear the top-level HTML element in the view
 		const container = this.containerEl;
 		container.empty();
@@ -113,13 +132,20 @@ class ToDoListTab extends ItemView {
 			)
 		).sort(toDoGroupSorter);
 
-		toDoItems.forEach((i) => {
-			buildToDoItemList(this.app, container, i);
-		});
+		if (toDoItems.length > 0) {
+			toDoItems.forEach((i) => {
+				buildToDoItemList(this.app, container, i);
+			});
+		} else {
+			container.createEl("div", {
+				cls: "error-message",
+				text: "No TODO items found in this vault.",
+			});
+		}
 	}
 }
 
-async function openFile(app: App, file: TFile): Promise<void> {
+async function openFile(app: App, file: TAbstractFile): Promise<void> {
 	// Look at all open markdown leaves
 	var leaves = app.workspace.getLeavesOfType("markdown");
 
@@ -133,20 +159,25 @@ async function openFile(app: App, file: TFile): Promise<void> {
 		app.workspace.setActiveLeaf(matchingLeaf);
 	} else {
 		// Otherwise, create a new leaf and open the selected file
-		var newLeaf = app.workspace.getLeaf(false);
-		await newLeaf.openFile(file);
+		var tFile = file as TFile;
+		if (tFile) {
+			var newLeaf = app.workspace.getLeaf(false);
+			await newLeaf.openFile(tFile);
+		}
 	}
 }
 
 interface IToDoGroup {
-	file: TFile;
+	file: TAbstractFile;
 	items: string[];
 }
 
 function buildToDoItemList(app: App, container: HTMLElement, grp: IToDoGroup) {
 	// Create header as a link
 	var header = container.createEl("h5");
-	var link = header.createEl("a", { text: grp.file.basename });
+	var link = header.createEl("a", {
+		text: path.basename(grp.file.name, path.extname(grp.file.name)),
+	});
 	link.addEventListener("click", async () => openFile(app, grp.file));
 
 	// Create list
@@ -155,16 +186,16 @@ function buildToDoItemList(app: App, container: HTMLElement, grp: IToDoGroup) {
 }
 
 function toDoGroupSorter(us: IToDoGroup, them: IToDoGroup) {
-	return us.file.basename === them.file.basename
+	return us.file.name === them.file.name
 		? 0
-		: us.file.basename > them.file.basename
+		: us.file.name > them.file.name
 		? 1
 		: -1;
 }
 
 async function getToDoGroupsFromFiles(
 	app: App,
-	files: TFile[]
+	files: TAbstractFile[]
 ): Promise<IToDoGroup[]> {
 	// Parse all files in the list and return any TODO entries
 	return (
@@ -172,23 +203,66 @@ async function getToDoGroupsFromFiles(
 	).filter((grp) => grp.items.length > 0);
 }
 
+const REGEXES = [
+	/^.*TODO\s*:\s*(.+?)$/,
+	/^(.+?)\s+TODO\s*$/,
+	/^(.+?[\s(]TODO[)\s].+?)$/,
+];
+
 async function getToDoGroupFromFile(
 	app: App,
-	file: TFile
+	file: TAbstractFile
 ): Promise<IToDoGroup> {
 	// Get the file contents
 	var md = await app.vault.adapter.read(file.path);
+	md = md.replace(/\[\[([^\]]+)\]\]/g, "$1");
 	var txt = removeMd(md);
 
 	// Search for any lines where TODO: appears. Clear any formatting around it and read to the end of the line.
-	var matches = [...txt.matchAll(/^.*TODO\s*:\s*(.+?)$/gm)]
-		.concat([...txt.matchAll(/^(.+?)\s+TODO\s*$/gm)])
-		.filter((m) => m[1]);
+	var lines: string[] = txt.split(/\r?\n/).map((x: string) => x.trim());
+
+	var items: string[] = [];
+
+	for (var lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+		var lineText = lines[lineIdx];
+		var foundMatch = false;
+
+		// Loop through all available regexes
+		for (var idx = 0; idx < REGEXES.length; idx++) {
+			var match = lineText.match(REGEXES[idx]);
+			var matchText = match && match[1]?.trim();
+
+			if (matchText && matchText !== "") {
+				items.push(matchText);
+				foundMatch = true;
+				break;
+			}
+		}
+
+		// If the line is just "TODO", try the previous line, then try all remaining lines
+		if (!foundMatch && lineText === "TODO") {
+			if (lines[lineIdx - 1] !== "") {
+				items.push(lines[lineIdx - 1]);
+				continue;
+			}
+
+			for (
+				var readahead = lineIdx + 1;
+				readahead < lines.length;
+				readahead++
+			) {
+				var readaheadText = lines[readahead];
+				if (readaheadText && readaheadText !== "") {
+					items.push(readaheadText);
+				} else {
+					break;
+				}
+			}
+		}
+	}
 
 	return {
 		file: file,
-		items: (matches || [])
-			.map((m) => m[1]?.trim())
-			.filter((x) => x && x !== ""),
+		items: items,
 	};
 }
