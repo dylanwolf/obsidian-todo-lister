@@ -20,6 +20,8 @@ const DEFAULT_SETTINGS: ToDoListerPluginSettings = {};
 // --------------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------------
+const TODO_LISTER_DATA_ID = "data-todolister-id";
+
 function getMatchingLeaf(app: App, file: TAbstractFile) {
 	return app.workspace
 		.getLeavesOfType("markdown")
@@ -60,25 +62,25 @@ class ToDoReader {
 			.sort(toDoGroupSorter);
 	}
 
+	getFileFor(path: string): IToDoGroup | undefined {
+		return this._dict[path] || undefined;
+	}
+
 	async loadAllFiles(app: App, files: TAbstractFile[]) {
-		console.log("ToDoReader.loadAllFiles");
 		return await Promise.all(
 			files.map(async (f) => this.loadFileFromDisk(app, f))
 		);
 	}
 
 	async updateFile(app: App, file: TAbstractFile) {
-		console.log("ToDoReader.updateFile: " + file.path);
 		this.loadFileFromWorkspace(app, file);
 	}
 
 	deleteFile(file: TAbstractFile) {
-		console.log("ToDoReader.deleteFile: " + file.path);
 		delete this._dict[file.path];
 	}
 
 	async renameFile(app: App, file: TAbstractFile, filename: string) {
-		console.log("ToDoReader.renameFile: " + file.path + ", " + filename);
 		delete this._dict[filename];
 		this.updateFile(app, file);
 	}
@@ -153,11 +155,6 @@ class ToDoReader {
 			}
 		}
 
-		if (items.length > 0) {
-			console.log(file.path);
-			console.log(items);
-		}
-
 		this._dict[file.path] =
 			items.length > 0
 				? {
@@ -197,25 +194,67 @@ class ToDoListTab extends ItemView {
 		this.reloadContents();
 	}
 
-	buildToDoItemList(app: App, container: HTMLElement, grp: IToDoGroup) {
-		var div = container.createDiv();
-		div.setAttribute("data-todolister-id", grp.file.path);
+	getHtmlNodeFor(path: string) {
+		return (
+			this.containerEl.querySelector(
+				`[${TODO_LISTER_DATA_ID}='${path}']`
+			) || undefined
+		);
+	}
+
+	buildNodeFor(grp: IToDoGroup) {
+		var div = this.containerEl.doc.createElement("div");
+		div.setAttribute(TODO_LISTER_DATA_ID, grp.file.path);
 
 		// Create header as a link
 		var header = div.createEl("h5");
 		var link = header.createEl("a", {
 			text: getBaseName(grp.file.name),
 		});
-		link.addEventListener("click", async () => openFile(app, grp.file));
+		link.addEventListener("click", async () =>
+			openFile(this.app, grp.file)
+		);
 
 		// Create list
 		var ul = div.createEl("ul");
 		grp.items.forEach((i) => ul.createEl("li", { text: i }));
+
+		return div;
+	}
+
+	async updateContentsFor(path: string) {
+		var node = this.getHtmlNodeFor(path);
+		var data = this.reader.getFileFor(path);
+
+		if (node && !data) {
+			// Delete if there's a node, but the file data no longer exists
+			this.containerEl.removeChild(node);
+		} else if (!node && data) {
+			// Insert if there's not a node, but there is data
+			var siblingNode: HTMLElement | undefined;
+			var sortedName = data.file.name;
+
+			for (var i = 0; i < this.containerEl.childNodes.length; i++) {
+				var elm = this.containerEl.childNodes[i] as HTMLElement;
+				if (elm && elm.hasAttribute(TODO_LISTER_DATA_ID)) {
+					var id = elm.getElementsByTagName("h5")[0]?.getText();
+					if (id && id >= sortedName) {
+						siblingNode = elm;
+						break;
+					}
+				}
+			}
+
+			var newNode = this.buildNodeFor(data);
+			this.containerEl.insertBefore(newNode, siblingNode || null);
+		} else if (node && data) {
+			// Replace if there's both a node and data
+			var newNode = this.buildNodeFor(data);
+			this.containerEl.replaceChild(newNode, node);
+		}
 	}
 
 	async reloadContents() {
-		console.log("ToDoListTab.reloadContents");
-
 		// Clear the top-level HTML element in the view
 		const container = this.containerEl;
 		container.empty();
@@ -225,7 +264,7 @@ class ToDoListTab extends ItemView {
 		var toDoItems = this.reader.getFilesInOrder();
 		if (toDoItems.length > 0) {
 			toDoItems.forEach((i) => {
-				this.buildToDoItemList(this.app, container, i);
+				container.appendChild(this.buildNodeFor(i));
 			});
 		} else {
 			container.createEl("div", {
@@ -280,24 +319,25 @@ export default class ToDoListerPlugin extends Plugin {
 			);
 
 			// Update the view
-			if (this.view) this.view?.reloadContents();
+			this.reloadView();
 
 			// Subscribe to events
 			app.vault.on("create", async (f) => {
 				this.reader.updateFile(app, f);
-				if (this.view) this.view?.reloadContents();
+				this.updateViewFor(f.path);
 			});
 			app.vault.on("modify", async (f) => {
 				this.reader.updateFile(app, f);
-				if (this.view) this.view?.reloadContents();
+				this.updateViewFor(f.path);
 			});
 			app.vault.on("delete", async (f) => {
 				this.reader.deleteFile(f);
-				if (this.view) this.view?.reloadContents();
+				this.updateViewFor(f.path);
 			});
 			app.vault.on("rename", async (f, filename) => {
 				this.reader.renameFile(app, f, filename);
-				if (this.view) this.view?.reloadContents();
+				this.updateViewFor(filename);
+				this.updateViewFor(f.path);
 			});
 		});
 
@@ -341,6 +381,14 @@ export default class ToDoListerPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	async reloadView() {
+		if (this.view) this.view?.reloadContents();
+	}
+
+	async updateViewFor(path: string) {
+		if (this.view) this.view?.updateContentsFor(path);
 	}
 
 	async activateView() {
