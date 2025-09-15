@@ -6,6 +6,8 @@ When I'm using Obsidian to write, I typically make notes prefixed or ending with
 
 TODO Lister will search all of your markdown files for any lines that contain "TODO" (see below for a detailed process), and then build a list of those notes grouped by file.
 
+![TODO Lister Screenshot](./documentation/todo-lister-screenshot.png)
+
 # Credits
 
 Based on Obsidian's sample plugin.
