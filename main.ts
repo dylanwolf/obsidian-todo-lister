@@ -282,10 +282,9 @@ async function openFile(app: App, file: TAbstractFile): Promise<void> {
 		app.workspace.setActiveLeaf(matchingLeaf);
 	} else {
 		// Otherwise, create a new leaf and open the selected file
-		let tFile = file as TFile;
-		if (tFile) {
+		if (file instanceof TFile) {
 			let newLeaf = app.workspace.getLeaf(false);
-			await newLeaf.openFile(tFile);
+			await newLeaf.openFile(file);
 		}
 	}
 }
@@ -360,7 +359,7 @@ export default class ToDoListerPlugin extends Plugin {
 		// Register a command to open the TODO List view
 		this.addCommand({
 			id: "todo-lister-open-listview",
-			name: "Open TODO Lister",
+			name: "View list of TODOs",
 			icon: "clipboard-list",
 			checkCallback: (checking: boolean) => {
 				this.activateView();
